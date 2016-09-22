@@ -2,7 +2,8 @@
 set -e;
 export LC_NUMERIC=C;
 
-delimiters="";
+start_delimiters="";
+end_delimiters="";
 verbose=1000;
 usage="
 Usage: ${0##*/} [options] <symbols-table> <not-a-symbol> <strings-table> <fst-wspecifier>
@@ -28,17 +29,30 @@ Description:
   The result is written as a table of FSTs using the given <fst-wspecifier>.
 
 Options:
-  --delimiters  : (string, default = \"$delimiters\")
-                  Set of delimiter symbols, separated by whitespaces.
+  --start-delimiters  : (string, default = \"$delimiters\")
+                        Set of starting delimiter symbols, separated by whitespaces.
+  --end-delimiters    : (string, default = \"$delimiters\")
+                        Set of ending delimiter symbols, separated by whitespaces.
+  --delimiters        : (string, default = \"$delimiters\")
+                        Set both starting and ending delimiter symbols, separated by whitespaces.
   --verbose     : (integer, default = $verbose)
                   Print query processing info every 'verbose' queries.
 ";
 while [ "${1:0:2}" = "--" ]; do
     case "$1" in
-	--delimiters)
-	    delimiters="$2";
-	    shift 2;
-	    ;;
+  "--start-delimiters")
+      start_delimiters="$2";
+      shift 2;
+      ;;
+  "--end-delimiters")
+      end_delimiters="$2";
+      shift 2;
+      ;;
+  "--delimiters")
+      start_delimiters="$2";
+      end_delimiters="$2";
+      shift 2;
+      ;;
 	"--verbose")
 	    verbose="$2";
 	    shift 2;
@@ -66,17 +80,23 @@ function check_exec() {
 check_exec gawk fstcompile fstcopy fstdeterminizestar fstminimizeencoded \
     fstarcsort fstprint || exit 1;
 
-gawk -v STF="$1" -v DLM="$delimiters " -v BLANK="$2" -v verbose="$verbose" '
+gawk -v STF="$1" -v SDLM="$start_delimiters" -v EDLM="$end_delimiters" -v BLANK="$2" -v verbose="$verbose" '
 BEGIN{
   max_id=0; numq=0;
   while ((getline < STF) > 0) {
     if ($2 > max_id) max_id=$2;       # store the largest symbol ID
     if ($2 != 0) { SYMBS[$1] = $2; }  # store non-epsilon symbols into SYMBS
   }
-  ND = split(DLM, DELIMITERS, " ");
-  for (s in DELIMITERS) {
-    if (!(DELIMITERS[s] in SYMBS)) {
-      print "SYMBOL \"" DELIMITERS[s] "\" NOT FOUND IN THE SYMBOLS TABLE!" > "/dev/stderr"; exit 1;
+  NDS = split(SDLM, SDELIMITERS);
+  for (s in SDELIMITERS) {
+    if (!(SDELIMITERS[s] in SYMBS)) {
+      print "SYMBOL \"" SDELIMITERS[s] "\" NOT FOUND IN THE SYMBOLS TABLE!" > "/dev/stderr"; exit 1;
+    }
+  }
+  NDE = split(EDLM, EDELIMITERS);
+  for (s in EDELIMITERS) {
+    if (!(EDELIMITERS[s] in SYMBS)) {
+      print "SYMBOL \"" EDELIMITERS[s] "\" NOT FOUND IN THE SYMBOLS TABLE!" > "/dev/stderr"; exit 1;
     }
   }
   if (!(BLANK in SYMBS)) {
@@ -102,16 +122,16 @@ BEGIN{
       }
     }
     if (!missing_symbols) {
-      W_BEG = 3 * ND + 2;            # State where the keyword begins
-      W_END = 3 * ND + N * 2 + 2;    # State where the keyword ends
-      FINAL = 6 * ND + N * 2 + 4;    # Final state
-      # Line can start with: (\Sigma^* [<delimiters>])?
+      W_BEG = 3 * NDS + 2;                      # State where the keyword begins
+      W_END = 3 * NDS + N * 2 + 2;              # State where the keyword ends
+      FINAL = 3 * ( NDS + NDE ) + N * 2 + 4;    # Final state
+      # Line can start with: (\Sigma^* [<start_delimiters>])?
       print 0, 1, 0 | cmd;
       print 0, W_BEG, 0 | cmd;
       for (s in SYMBS) { print 1, 1, SYMBS[s] | cmd; }
-      if (ND > 0) {
-        for (i in DELIMITERS) {
-          s = SYMBS[DELIMITERS[i]];
+      if (NDS > 0) {
+        for (i in SDELIMITERS) {
+          s = SYMBS[SDELIMITERS[i]];
           s_b = 2 + (i - 1) * 3;
           print 1, s_b, 0               | cmd;
           print s_b, s_b + 1, BLANK     | cmd;
@@ -136,9 +156,9 @@ BEGIN{
         print s_b + 2, s_b + 2, s                     | cmd;
         ps = s;
       }
-      if (ND > 0) {
-        for (i in DELIMITERS) {
-          s = SYMBS[DELIMITERS[i]];
+      if (NDE > 0) {
+        for (i in EDELIMITERS) {
+          s = SYMBS[EDELIMITERS[i]];
           s_b = W_END + 1 + (i - 1) * 3;
           print W_END, s_b, 0           | cmd;
           print s_b, s_b + 1, BLANK     | cmd;
